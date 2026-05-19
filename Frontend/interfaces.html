@@ -218,6 +218,12 @@
         window.__interfaceToastTimer = window.setTimeout(() => setToast(null), 4000);
       };
 
+      const notifySync = () => {
+        const syncStamp = String(Date.now());
+        localStorage.setItem('netguard-network-sync-at', syncStamp);
+        window.dispatchEvent(new CustomEvent('netguard:interface-updated'));
+      };
+
       // ── Charger la liste des switches depuis la BDD ───────────────────────
       const loadSwitches = async () => {
         setIsLoadingSwitches(true);
@@ -345,6 +351,32 @@
         }
       }, [selectedSwitchId, switches.length]);
 
+      useEffect(() => {
+        const refreshFromSync = () => {
+          if (selectedSwitchId !== null) {
+            loadInterfaces(selectedSwitchId);
+          }
+        };
+
+        const handleStorage = (event) => {
+          if (event.key === 'netguard-network-sync-at' || event.key === 'netguard-vlan-updated-at') {
+            refreshFromSync();
+          }
+        };
+
+        window.addEventListener('focus', refreshFromSync);
+        window.addEventListener('storage', handleStorage);
+        window.addEventListener('netguard:interface-updated', refreshFromSync);
+        window.addEventListener('netguard:vlan-updated', refreshFromSync);
+
+        return () => {
+          window.removeEventListener('focus', refreshFromSync);
+          window.removeEventListener('storage', handleStorage);
+          window.removeEventListener('netguard:interface-updated', refreshFromSync);
+          window.removeEventListener('netguard:vlan-updated', refreshFromSync);
+        };
+      }, [selectedSwitchId]);
+
       const persistPort = async (port, successMessage) => {
         const payload = buildInterfacePayload(port);
         const method = port.dbExists && port.id_interface ? 'PUT' : 'POST'; // Ensure id_interface exists for PUT
@@ -366,7 +398,7 @@
         setPorts((currentPorts) =>
           currentPorts.map((item) => item.id === port.id ? { ...savedPort, configured: true, dbExists: true } : item)
         );
-        window.dispatchEvent(new CustomEvent('netguard:interface-updated'));
+        notifySync();
         showToast(successMessage);
       };
 

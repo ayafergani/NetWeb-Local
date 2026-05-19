@@ -5,16 +5,28 @@ import logging
 import os
 import psycopg2.extras
 import re
+import threading
 import yaml
 
 vlan_bp = Blueprint("vlan", __name__)
 logger = logging.getLogger(__name__)
 HOSTS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "network", "hosts.yaml")
+_VLAN_COLUMNS = None
+_VLAN_COLUMNS_LOCK = threading.Lock()
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def get_vlan_columns(conn):
+    global _VLAN_COLUMNS
+
+    if _VLAN_COLUMNS is not None:
+        return _VLAN_COLUMNS
+
+    with _VLAN_COLUMNS_LOCK:
+        if _VLAN_COLUMNS is not None:
+            return _VLAN_COLUMNS
+
     cur = conn.cursor()
     try:
         cur.execute("""
@@ -22,7 +34,8 @@ def get_vlan_columns(conn):
             FROM information_schema.columns
             WHERE table_name = 'vlan'
         """)
-        return {row[0] for row in cur.fetchall()}
+        _VLAN_COLUMNS = {row[0] for row in cur.fetchall()}
+        return _VLAN_COLUMNS
     finally:
         cur.close()
 
@@ -109,6 +122,14 @@ def validate_port_assignments(cur, ports, id_switch=None):
         existing_ports[normalize_interface_name(port)]
         for port in requested_ports
     )
+
+
+def clear_dashboard_cache():
+    try:
+        from dashboard_api import clear_dashboard_cache as clear_cache
+        clear_cache()
+    except Exception:
+        logger.debug("Cache dashboard non invalide", exc_info=True)
 
 
 def get_fallback_vlan_id(cur, excluded_vlan_id=None):
@@ -963,6 +984,7 @@ def create_vlan():
             resolve_switch_id(cur, payload),
         )
         conn.commit()
+        clear_dashboard_cache()
 
     except Exception as e:
         conn.rollback()
@@ -1034,6 +1056,7 @@ def update_vlan(id_vlan):
             resolve_switch_id(cur, payload),
         )
         conn.commit()
+        clear_dashboard_cache()
         return jsonify({"success": True, "message": f"VLAN {id_vlan} mis à jour.", "vlan": build_vlan_response(row)})
     except Exception as e:
         conn.rollback()
@@ -1071,6 +1094,7 @@ def delete_vlan(id_vlan):
 
         sync_interfaces_with_vlan_ports(cur, id_vlan, "", None)
         conn.commit()
+        clear_dashboard_cache()
     except Exception as e:
         conn.rollback()
         return jsonify({"success": False, "error": str(e)}), 500

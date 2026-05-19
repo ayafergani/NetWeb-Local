@@ -1,5 +1,6 @@
 import logging
 import os
+from pathlib import Path
 import threading
 import time
 
@@ -12,21 +13,47 @@ logger = logging.getLogger(__name__)
 _POOL = None
 _POOL_LOCK = threading.Lock()
 _POOL_SEMAPHORE = None
+_LOCAL_MODE_LOGGED = False
+
+
+def _load_dotenv_file():
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv_file()
+
+
+def _is_local_env():
+    return os.getenv("ENV", "local").strip().lower() == "local"
 
 
 def _get_database_url():
-    return os.getenv("DATABASE_URL", "").strip()
+    return ""
 
 
 def _get_pool_limits():
     min_conn = int(os.getenv("DB_POOL_MIN", "1"))
     max_conn = int(os.getenv("DB_POOL_MAX", "3"))
-    return max(1, min_conn), max(1, max_conn)
+    min_conn = max(1, min_conn)
+    max_conn = max(min_conn, max_conn)
+    return min_conn, max_conn
 
 
 def _get_connect_kwargs():
-    database_url = _get_database_url()
-    sslmode = os.getenv("DB_SSLMODE", "require").strip() or "require"
+    sslmode = os.getenv("DB_SSLMODE", "disable").strip() or "disable"
     connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
     statement_timeout = int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "15000"))
     lock_timeout = int(os.getenv("DB_LOCK_TIMEOUT_MS", "3000"))
@@ -36,14 +63,6 @@ def _get_connect_kwargs():
         f"-c lock_timeout={lock_timeout} "
         f"-c idle_in_transaction_session_timeout={idle_timeout}"
     )
-
-    if database_url:
-        return {
-            "dsn": database_url,
-            "sslmode": sslmode,
-            "connect_timeout": connect_timeout,
-            "options": options,
-        }
 
     return {
         "dbname": os.getenv("DB_NAME", "ids_db"),
@@ -57,8 +76,16 @@ def _get_connect_kwargs():
     }
 
 
+def log_database_mode():
+    global _LOCAL_MODE_LOGGED
+
+    if _is_local_env() and not _LOCAL_MODE_LOGGED:
+        logger.info("MODE LOCAL ACTIVÉ - DB_HOST = %s", os.getenv("DB_HOST", "192.168.1.2"))
+        _LOCAL_MODE_LOGGED = True
+
+
 def _get_pool():
-    global _POOL, _POOL_SEMAPHORE
+    global _POOL, _POOL_SEMAPHORE, _LOCAL_MODE_LOGGED
 
     if _POOL is not None:
         return _POOL
@@ -69,14 +96,19 @@ def _get_pool():
 
         min_conn, max_conn = _get_pool_limits()
         _POOL_SEMAPHORE = threading.BoundedSemaphore(max_conn)
+        if _is_local_env() and not _LOCAL_MODE_LOGGED:
+            logger.info("MODE LOCAL ACTIVÉ - DB_HOST = %s", os.getenv("DB_HOST", "192.168.1.2"))
+            _LOCAL_MODE_LOGGED = True
         _POOL = pool.ThreadedConnectionPool(min_conn, max_conn, **_get_connect_kwargs())
         logger.info("PostgreSQL pool initialise: min=%s max=%s", min_conn, max_conn)
         return _POOL
 
 
 class SlowCursorProxy:
-    def __init__(self, cursor):
+    def __init__(self, cursor, on_close=None):
         self._cursor = cursor
+        self._on_close = on_close
+        self._closed = False
         self._slow_ms = int(os.getenv("DB_SLOW_QUERY_MS", "750"))
 
     def execute(self, query, vars=None):
@@ -104,10 +136,30 @@ class SlowCursorProxy:
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        return self._cursor.__exit__(exc_type, exc, tb)
+        try:
+            return self._cursor.__exit__(exc_type, exc, tb)
+        finally:
+            self._mark_closed()
 
     def __iter__(self):
         return iter(self._cursor)
+
+    def close(self):
+        if self._closed:
+            return
+
+        try:
+            self._cursor.close()
+        finally:
+            self._mark_closed()
+
+    def _mark_closed(self):
+        if self._closed:
+            return
+
+        self._closed = True
+        if self._on_close is not None:
+            self._on_close(self)
 
     def __getattr__(self, name):
         return getattr(self._cursor, name)
@@ -118,13 +170,25 @@ class PooledConnectionProxy:
         self._pool = pg_pool
         self._conn = raw_conn
         self._returned = False
+        self._open_cursors = []
 
     @property
     def closed(self):
         return True if self._returned else self._conn.closed
 
     def cursor(self, *args, **kwargs):
-        return SlowCursorProxy(self._conn.cursor(*args, **kwargs))
+        cursor_proxy = SlowCursorProxy(
+            self._conn.cursor(*args, **kwargs),
+            on_close=self._unregister_cursor,
+        )
+        self._open_cursors.append(cursor_proxy)
+        return cursor_proxy
+
+    def _unregister_cursor(self, cursor_proxy):
+        try:
+            self._open_cursors.remove(cursor_proxy)
+        except ValueError:
+            pass
 
     def close(self):
         global _POOL_SEMAPHORE
@@ -134,6 +198,9 @@ class PooledConnectionProxy:
 
         close_conn = bool(self._conn.closed)
         try:
+            for cursor_proxy in self._open_cursors[:]:
+                cursor_proxy.close()
+
             if not close_conn and self._conn.get_transaction_status() != TRANSACTION_STATUS_IDLE:
                 self._conn.rollback()
         except Exception:
@@ -158,6 +225,7 @@ class PooledConnectionProxy:
 
 
 def get_db_connection():
+    log_database_mode()
     pg_pool = _get_pool()
     timeout = float(os.getenv("DB_POOL_TIMEOUT", "3"))
 

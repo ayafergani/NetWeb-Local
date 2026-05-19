@@ -29,7 +29,7 @@ Utilisation dans les autres modules :
 
     # Dans une route Flask :
     log_action(
-        actor    = get_jwt_identity(),
+        actor    = "username",  # À fournir depuis votre source d'authentification
         role     = session_role,
         action   = "create_vlan",
         module   = "VLAN",
@@ -40,7 +40,6 @@ Utilisation dans les autres modules :
 """
 
 from flask import Blueprint, request, jsonify, g
-from flask_jwt_extended import jwt_required, get_jwt_identity
 from Database.db import get_db_connection
 import psycopg2.extras
 import logging
@@ -100,7 +99,6 @@ def _get_ip():
 # ═══════════════════════════════════════════════════════════════
 
 @audit_bp.route("/api/audit/logs", methods=["GET"])
-@jwt_required()
 def get_audit_logs():
     """
     Retourne les événements d'audit avec filtres optionnels.
@@ -189,7 +187,6 @@ def get_audit_logs():
 
 
 @audit_bp.route("/api/audit/logs/user/<string:username>", methods=["GET"])
-@jwt_required()
 def get_user_audit(username):
     """Retourne tous les événements d'un utilisateur spécifique (traçabilité individuelle)."""
     limit = min(int(request.args.get("limit", 50)), 200)
@@ -226,7 +223,6 @@ def get_user_audit(username):
 
 
 @audit_bp.route("/api/audit/stats", methods=["GET"])
-@jwt_required()
 def get_audit_stats():
     """Statistiques globales pour le dashboard des logs."""
     try:

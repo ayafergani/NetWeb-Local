@@ -203,6 +203,24 @@ def ensure_interface_schema():
                 conn.rollback()
         else:
             logger.info("La colonne static_mac existe deja dans la table interface")
+
+        if "description" not in columns:
+            try:
+                cur.execute("ALTER TABLE interface ADD COLUMN description TEXT")
+                conn.commit()
+                logger.info("Colonne interface.description ajoutee")
+            except Exception as alter_error:
+                logger.warning(f"Impossible d'ajouter la colonne description: {alter_error}")
+                conn.rollback()
+
+        if "duplex" not in columns:
+            try:
+                cur.execute("ALTER TABLE interface ADD COLUMN duplex VARCHAR(32)")
+                conn.commit()
+                logger.info("Colonne interface.duplex ajoutee")
+            except Exception as alter_error:
+                logger.warning(f"Impossible d'ajouter la colonne duplex: {alter_error}")
+                conn.rollback()
                 
     except Exception as e:
         conn.rollback()
@@ -311,6 +329,8 @@ def row_to_interface(row):
         "mode": row["mode"],      # access ou trunk (configuration logicielle)
         "type": row["type"],       # access ou uplink (type physique)
         "speed": row["speed"],
+        "duplex": row.get("duplex"),
+        "description": row.get("description"),
         "allowed_vlans": row["allowed_vlans"],
         "port_security": row["port_security"],
         "max_mac": row["max_mac"],
@@ -399,6 +419,8 @@ def normalize_interface_payload(data, forced_id=None, cur=None):
         "mode": mode_value,
         "type": type_value,
         "speed": str(data.get("speed", "")).strip() or None,
+        "duplex": str(data.get("duplex", "")).strip() or None,
+        "description": str(data.get("description", "")).strip() or None,
         "allowed_vlans": str(data.get("allowed_vlans", "")).strip() or None,
         "port_security": bool(data.get("port_security", False)),
         "max_mac": max_mac,
@@ -436,6 +458,7 @@ def get_interfaces():
                 i.id_interface, i.nom, i.ip, i.vlan_id, i.id_switch, i.equipement_id, 
                 i.status, i.mode, i.type, i.speed, i.allowed_vlans, 
                 i.port_security, i.max_mac, i.violation_mode, i.bpdu_guard,
+                i.duplex, i.description,
                 s.nom as switch_name, s.ip as switch_ip,
                 v.nom as vlan_name, v.reseau as vlan_reseau
             FROM interface i
@@ -506,11 +529,11 @@ def create_interface():
         cur.execute("""
             INSERT INTO interface (
                 nom, ip, vlan_id, id_switch, equipement_id, status, mode, type,
-                speed, allowed_vlans, port_security, max_mac, violation_mode, bpdu_guard
+                speed, duplex, description, allowed_vlans, port_security, max_mac, violation_mode, bpdu_guard
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id_interface, nom, ip, vlan_id, id_switch, equipement_id, status, mode, type,
-                      speed, allowed_vlans, port_security, max_mac, violation_mode, bpdu_guard
+                      speed, duplex, description, allowed_vlans, port_security, max_mac, violation_mode, bpdu_guard
         """, (
             payload["nom"],
             payload["ip"],
@@ -521,6 +544,8 @@ def create_interface():
             payload["mode"],
             payload["type"],
             payload["speed"],
+            payload["duplex"],
+            payload["description"],
             payload["allowed_vlans"],
             payload["port_security"],
             payload["max_mac"],
@@ -593,6 +618,8 @@ def update_interface(interface_id):
                 mode = %s,
                 type = %s,
                 speed = %s,
+                duplex = %s,
+                description = %s,
                 allowed_vlans = %s,
                 port_security = %s,
                 max_mac = %s,
@@ -600,7 +627,7 @@ def update_interface(interface_id):
                 bpdu_guard = %s
             WHERE id_interface = %s
             RETURNING id_interface, nom, ip, vlan_id, id_switch, equipement_id, status, mode, type,
-                      speed, allowed_vlans, port_security, max_mac, violation_mode, bpdu_guard
+                      speed, duplex, description, allowed_vlans, port_security, max_mac, violation_mode, bpdu_guard
         """, (
             payload["nom"],
             payload["ip"],
@@ -611,6 +638,8 @@ def update_interface(interface_id):
             payload["mode"],
             payload["type"],
             payload["speed"],
+            payload["duplex"],
+            payload["description"],
             payload["allowed_vlans"],
             payload["port_security"],
             payload["max_mac"],

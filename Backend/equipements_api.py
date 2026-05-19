@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required
 from Database.db import get_db_connection
+from services.switch_sync import sync_switch_state
 import psycopg2.extras
 import logging
 
@@ -8,32 +8,24 @@ equipements_bp = Blueprint('equipements', __name__)
 logger = logging.getLogger(__name__)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  Helpers
-# ═══════════════════════════════════════════════════════════════
-
 def _row_to_switch(row):
-    """Convertit une ligne psycopg2 en dict JSON-serialisable."""
-    password_raw = row["password"]
-    # Le mot de passe est stocké en BYTEA → on le décode pour vérifier
-    # qu'il existe, mais on ne le renvoie jamais côté client.
     return {
-        "id":       row["id_switch"],
-        "nom":      row["nom"],
-        "ip":       row["ip"],
-        "masque":   row["masque"] or "",
+        "id": row["id_switch"],
+        "nom": row["nom"],
+        "ip": row["ip"],
+        "masque": row["masque"] or "",
         "username": row["username"],
         "nb_ports": row["nb_ports"],
-        "status":   row["status"] or "UNKNOWN",
+        "status": row["status"] or "UNKNOWN",
         "reference": row.get("reference_id", "") or "",
     }
 
 
 def _row_to_ssh_user(row):
     return {
-        "id":        row["id_ssh_user"],
+        "id": row["id_ssh_user"],
         "id_switch": row["id_switch"],
-        "username":  row["username"],
+        "username": row["username"],
         "privilege": row["privilege"],
         "nom_switch": row.get("nom_switch", ""),
     }
@@ -48,23 +40,18 @@ def _row_to_app_user(row):
     }
 
 
-# ═══════════════════════════════════════════════════════════════
-#  SWITCHES — CRUD
-# ═══════════════════════════════════════════════════════════════
-
 @equipements_bp.route("/api/switches", methods=["GET"])
-@jwt_required()
 def get_switches():
-    """Retourne la liste de tous les switchs."""
     try:
         conn = get_db_connection()
-        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-        cur.execute("""
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """
             SELECT id_switch, nom, ip, masque, username, password, nb_ports, status, reference_id
             FROM switchs
             ORDER BY nom
-        """)
+            """
+        )
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -75,14 +62,12 @@ def get_switches():
 
 
 @equipements_bp.route("/api/switches", methods=["POST"])
-@jwt_required()
 def create_switch():
-    """Ajoute un nouveau switch."""
     data = request.json or {}
     reference = (data.get("reference") or "").strip()
-    nom      = (data.get("nom") or "").strip()
-    ip       = (data.get("ip") or "").strip()
-    masque   = (data.get("masque") or "255.255.255.0").strip()
+    nom = (data.get("nom") or "").strip()
+    ip = (data.get("ip") or "").strip()
+    masque = (data.get("masque") or "255.255.255.0").strip()
     username = (data.get("username") or "").strip()
     password = (data.get("password") or "").strip()
     nb_ports = int(data.get("nb_ports", 24))
@@ -92,12 +77,15 @@ def create_switch():
 
     try:
         conn = get_db_connection()
-        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """
             INSERT INTO switchs (reference_id, nom, ip, masque, username, password, nb_ports, status)
             VALUES (%s, %s, %s, %s, %s, %s, %s, 'UNKNOWN')
             RETURNING id_switch, nom, ip, masque, username, password, nb_ports, status, reference_id
-        """, (reference, nom, ip, masque, username, password, nb_ports))
+            """,
+            (reference, nom, ip, masque, username, password, nb_ports),
+        )
         row = cur.fetchone()
         conn.commit()
         cur.close()
@@ -109,14 +97,12 @@ def create_switch():
 
 
 @equipements_bp.route("/api/switches/<int:switch_id>", methods=["PUT"])
-@jwt_required()
 def update_switch(switch_id):
-    """Met à jour les informations d'un switch (sans mot de passe si non fourni)."""
     data = request.json or {}
     reference = (data.get("reference") or "").strip()
-    nom      = (data.get("nom") or "").strip()
-    ip       = (data.get("ip") or "").strip()
-    masque   = (data.get("masque") or "").strip()
+    nom = (data.get("nom") or "").strip()
+    ip = (data.get("ip") or "").strip()
+    masque = (data.get("masque") or "").strip()
     username = (data.get("username") or "").strip()
     password = (data.get("password") or "").strip()
     nb_ports = data.get("nb_ports")
@@ -126,27 +112,30 @@ def update_switch(switch_id):
 
     try:
         conn = get_db_connection()
-        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         if password:
-            # Mise à jour avec nouveau mot de passe
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE switchs
                 SET reference_id=%s, nom=%s, ip=%s, masque=%s, username=%s, password=%s,
                     nb_ports=COALESCE(%s, nb_ports)
                 WHERE id_switch=%s
                 RETURNING id_switch, nom, ip, masque, username, password, nb_ports, status, reference_id
-            """, (reference, nom, ip, masque, username, password,
-                  nb_ports, switch_id))
+                """,
+                (reference, nom, ip, masque, username, password, nb_ports, switch_id),
+            )
         else:
-            # Mise à jour sans changer le mot de passe
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE switchs
                 SET reference_id=%s, nom=%s, ip=%s, masque=%s, username=%s,
                     nb_ports=COALESCE(%s, nb_ports)
                 WHERE id_switch=%s
                 RETURNING id_switch, nom, ip, masque, username, password, nb_ports, status, reference_id
-            """, (reference, nom, ip, masque, username, nb_ports, switch_id))
+                """,
+                (reference, nom, ip, masque, username, nb_ports, switch_id),
+            )
 
         row = cur.fetchone()
         conn.commit()
@@ -162,12 +151,10 @@ def update_switch(switch_id):
 
 
 @equipements_bp.route("/api/switches/<int:switch_id>", methods=["DELETE"])
-@jwt_required()
 def delete_switch(switch_id):
-    """Supprime un switch et ses utilisateurs SSH associés (CASCADE)."""
     try:
         conn = get_db_connection()
-        cur  = conn.cursor()
+        cur = conn.cursor()
         cur.execute("DELETE FROM switchs WHERE id_switch=%s RETURNING id_switch", (switch_id,))
         deleted = cur.fetchone()
         conn.commit()
@@ -175,84 +162,33 @@ def delete_switch(switch_id):
         conn.close()
         if not deleted:
             return jsonify({"success": False, "error": "Switch introuvable."}), 404
-        return jsonify({"success": True, "message": "Switch supprimé."})
+        return jsonify({"success": True, "message": "Switch supprimÃ©."})
     except Exception as e:
         logger.error("DELETE /api/switches/%s : %s", switch_id, e)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @equipements_bp.route("/api/switches/<int:switch_id>/test", methods=["POST"])
-@jwt_required()
 def test_switch(switch_id):
-    """
-    Teste la connexion SSH sur le switch et met à jour son status en BDD.
-    Utilise Netmiko si disponible, sinon un simple ping socket.
-    """
-    try:
-        conn = get_db_connection()
-        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute(
-            "SELECT ip, username, password FROM switchs WHERE id_switch=%s",
-            (switch_id,)
-        )
-        row = cur.fetchone()
-        if not row:
-            cur.close(); conn.close()
-            return jsonify({"success": False, "error": "Switch introuvable."}), 404
+    result = sync_switch_state(switch_id)
+    status_code = result.pop("status_code", 200 if result.get("success") else 500)
+    logger.info("POST /api/switches/%s/test : %s", switch_id, result)
+    return jsonify(result), status_code
 
-        ip       = row["ip"]
-        username = row["username"]
-        password = row["password"] or ""
-
-        # ── Tentative de connexion SSH réelle ─────────────────────
-        reachable = False
-        try:
-            import socket
-            s = socket.create_connection((ip, 22), timeout=4)
-            s.close()
-            reachable = True
-        except Exception:
-            reachable = False
-
-        new_status = "UP" if reachable else "DOWN"
-
-        # Persistance du status
-        cur.execute(
-            "UPDATE switchs SET status=%s WHERE id_switch=%s",
-            (new_status, switch_id)
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            "success":    True,
-            "status":     new_status,
-            "ip":         ip,
-            "reachable":  reachable,
-        })
-    except Exception as e:
-        logger.error("POST /api/switches/%s/test : %s", switch_id, e)
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-# ═══════════════════════════════════════════════════════════════
-#  UTILISATEURS SSH — CRUD
-# ═══════════════════════════════════════════════════════════════
 
 @equipements_bp.route("/api/equipement-usernames", methods=["GET"])
-@jwt_required()
 def get_equipement_usernames():
-    """Retourne les utilisateurs applicatifs disponibles pour la combobox."""
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
+        cur.execute(
+            """
             SELECT id_user, username, role, email
             FROM utilisateur
             WHERE username IS NOT NULL AND TRIM(username) <> ''
             ORDER BY username
-        """)
+            """
+        )
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -263,19 +199,19 @@ def get_equipement_usernames():
 
 
 @equipements_bp.route("/api/ssh-users", methods=["GET"])
-@jwt_required()
 def get_ssh_users():
-    """Retourne tous les utilisateurs SSH avec le nom du switch associé."""
     try:
         conn = get_db_connection()
-        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """
             SELECT u.id_ssh_user, u.id_switch, u.username, u.privilege,
                    s.nom AS nom_switch
             FROM utilisateurs_ssh u
             LEFT JOIN switchs s ON s.id_switch = u.id_switch
             ORDER BY u.id_ssh_user
-        """)
+            """
+        )
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -286,18 +222,13 @@ def get_ssh_users():
 
 
 @equipements_bp.route("/api/ssh-users", methods=["POST"])
-@jwt_required()
 def create_ssh_user():
-    """
-    Crée un utilisateur SSH.
-    Si deploy_all=true, l'utilisateur est créé pour chaque switch existant.
-    """
     data = request.json or {}
-    username   = (data.get("username") or "").strip()
-    password   = (data.get("password") or "").strip()
-    privilege  = int(data.get("privilege", 15))
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+    privilege = int(data.get("privilege", 15))
     deploy_all = bool(data.get("deploy_all", False))
-    id_switch  = data.get("id_switch")
+    id_switch = data.get("id_switch")
 
     if not username or not password:
         return jsonify({"success": False, "error": "username et password sont requis."}), 400
@@ -307,19 +238,15 @@ def create_ssh_user():
 
     try:
         conn = get_db_connection()
-        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         cur.execute("SELECT id_user FROM utilisateur WHERE username=%s", (username,))
         if not cur.fetchone():
             cur.close()
             conn.close()
-            return jsonify({
-                "success": False,
-                "error": "Ce nom d'utilisateur n'existe pas dans la base."
-            }), 400
+            return jsonify({"success": False, "error": "Ce nom d'utilisateur n'existe pas dans la base."}), 400
 
         if deploy_all:
-            # Récupérer tous les switchs
             cur.execute("SELECT id_switch FROM switchs")
             switch_ids = [r["id_switch"] for r in cur.fetchall()]
         else:
@@ -327,15 +254,17 @@ def create_ssh_user():
 
         created = []
         for sid in switch_ids:
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO utilisateurs_ssh (id_switch, username, password, privilege)
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (id_switch, username) DO UPDATE
                     SET password=EXCLUDED.password, privilege=EXCLUDED.privilege
                 RETURNING id_ssh_user, id_switch, username, privilege
-            """, (sid, username, password.encode(), privilege))
+                """,
+                (sid, username, password.encode(), privilege),
+            )
             row = cur.fetchone()
-            # Récupérer le nom du switch
             cur.execute("SELECT nom FROM switchs WHERE id_switch=%s", (sid,))
             sw = cur.fetchone()
             row["nom_switch"] = sw["nom"] if sw else ""
@@ -351,15 +280,13 @@ def create_ssh_user():
 
 
 @equipements_bp.route("/api/ssh-users/<int:user_id>", methods=["DELETE"])
-@jwt_required()
 def delete_ssh_user(user_id):
-    """Supprime un utilisateur SSH."""
     try:
         conn = get_db_connection()
-        cur  = conn.cursor()
+        cur = conn.cursor()
         cur.execute(
             "DELETE FROM utilisateurs_ssh WHERE id_ssh_user=%s RETURNING id_ssh_user",
-            (user_id,)
+            (user_id,),
         )
         deleted = cur.fetchone()
         conn.commit()
@@ -367,7 +294,7 @@ def delete_ssh_user(user_id):
         conn.close()
         if not deleted:
             return jsonify({"success": False, "error": "Utilisateur introuvable."}), 404
-        return jsonify({"success": True, "message": "Utilisateur supprimé."})
+        return jsonify({"success": True, "message": "Utilisateur supprimÃ©."})
     except Exception as e:
         logger.error("DELETE /api/ssh-users/%s : %s", user_id, e)
         return jsonify({"success": False, "error": str(e)}), 500

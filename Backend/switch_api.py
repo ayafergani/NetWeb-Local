@@ -1,14 +1,12 @@
 from flask import Blueprint, request, jsonify
 from Database.db import get_db_connection
 from utils.crypto_utils import encrypt_password, decrypt_password
-from utils.decorators import require_role
 import psycopg2.extras
 from netmiko import ConnectHandler
 
 switch_bp = Blueprint('switch', __name__)
 
 @switch_bp.route("/api/switches", methods=["GET"])
-@require_role("ADMIN")
 def get_switches():
     """Récupère les switchs pour le tableau de bord (sans MDP)"""
     conn = get_db_connection()
@@ -27,7 +25,6 @@ def get_switches():
         conn.close()
 
 @switch_bp.route("/api/switches", methods=["POST"])
-@require_role("ADMIN")
 def add_switch():
     """Ajoute un switch de manière sécurisée"""
     data = request.json
@@ -57,7 +54,6 @@ def add_switch():
         if 'conn' in locals(): conn.close()
 
 @switch_bp.route("/api/switches/<int:switch_id>/test", methods=["POST"])
-@require_role("ADMIN")
 def test_switch_connection(switch_id):
     """Test de connexion SSH direct (réutilise ton infrastructure Netmiko)"""
     try:

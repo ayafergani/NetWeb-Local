@@ -425,7 +425,7 @@
         };
 
         const handleStorage = (event) => {
-          if (event.key === 'netguard-vlan-updated-at') {
+          if (event.key === 'netguard-vlan-updated-at' || event.key === 'netguard-network-sync-at') {
             loadDashboardSummary(false);
           }
         };
@@ -535,7 +535,7 @@
                 <span className="data-value">{vlanStats.lastCreated ? `VLAN ${vlanStats.lastCreated.id_vlan ?? vlanStats.lastCreated.id} - ${vlanStats.lastCreated.nom ?? vlanStats.lastCreated.name}` : 'Aucun VLAN'}</span>
               </div>
               <div className="data-row">
-                <span className="data-label">Réseau</span>
+                <span className="data-label">Sous-réseau</span>
                 <span className="data-value">{vlanStats.lastCreated ? (vlanStats.lastCreated.reseau ?? vlanStats.lastCreated.vlanIp ?? '--') : '--'}</span>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '5px' }}>

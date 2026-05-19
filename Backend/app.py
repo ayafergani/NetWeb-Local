@@ -1,10 +1,10 @@
 from datetime import timedelta
 import logging
 import os
+from pathlib import Path
 
 from flask import Flask, send_from_directory
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager
 
 from auth import auth_bp
 from Database.alerts import alerts_bp
@@ -23,22 +23,34 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.normpath(os.path.join(BASE_DIR, "..", "Frontend"))
 
 
+def _load_dotenv_file():
+    env_path = Path(BASE_DIR) / ".env"
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv_file()
+
+
 def _get_cors_origins():
     raw_origins = os.getenv("CORS_ORIGINS", "").strip()
     if not raw_origins:
-        return "*"
-    origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
-    vercel_origin_pattern = r"https://.*\.vercel\.app"
-    if vercel_origin_pattern not in origins:
-        origins.append(vercel_origin_pattern)
-    return origins
+        return ["http://127.0.0.1:5000", "http://localhost:5000"]
+    return [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
 
 
-def _get_jwt_secret():
-    secret = os.getenv("JWT_SECRET_KEY", "").strip()
-    if not secret:
-        raise RuntimeError("JWT_SECRET_KEY manquant. Configurez-le avant de lancer l'application.")
-    return secret
+
 
 
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
@@ -46,10 +58,6 @@ app.url_map.strict_slashes = False
 logging.basicConfig(level=logging.INFO)
 
 CORS(app, resources={r"/*": {"origins": _get_cors_origins()}}, supports_credentials=False)
-
-app.config["JWT_SECRET_KEY"] = _get_jwt_secret()
-app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=8)
-jwt = JWTManager(app)
 
 app.register_blueprint(users_bp)
 app.register_blueprint(auth_bp)

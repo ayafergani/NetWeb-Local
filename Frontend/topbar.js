@@ -1163,7 +1163,7 @@ function _launchPBat(option, params, btn, originalLabel, successLabel) {
     } catch(e) {
       // Silencieux — API peut être indisponible
     } finally {
-      // Intervalle beaucoup plus long (30s) pour éviter de saturer le tunnel ngrok
+      // Intervalle allonge pour limiter la charge du backend local.
       setTimeout(_pollAlerts, 30000);
     }
   }

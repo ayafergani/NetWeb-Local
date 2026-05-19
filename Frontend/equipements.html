@@ -452,18 +452,32 @@
 
       useEffect(() => { loadData(); }, [loadData]);
 
-      /* ── 1. Tester la connexion SSH ── */
+      const notifyNetworkSync = () => {
+        const syncStamp = String(Date.now());
+        localStorage.setItem('netguard-network-sync-at', syncStamp);
+        localStorage.setItem('netguard-vlan-updated-at', syncStamp);
+        window.dispatchEvent(new CustomEvent('netguard:interface-updated'));
+        window.dispatchEvent(new CustomEvent('netguard:vlan-updated'));
+      };
+
+      /* ── 1. Tester la connexion SSH + synchroniser ── */
       const handleTest = async (id, ip) => {
         setTestingIds(p => ({ ...p, [id]: true }));
         try {
           const res = await apiFetch(`/api/switches/${id}/test`, { method: 'POST' });
-          setEquipements(eqs => eqs.map(e => e.id === id ? { ...e, status: res.status } : e));
-          addToast(
-            res.reachable
-              ? `SSH joignable sur ${ip}`
-              : `Injoignable sur ${ip} — vérifiez l'hôte et le port 22`,
-            res.reachable ? 'success' : 'error'
-          );
+          setEquipements(eqs => eqs.map(e => e.id === id ? { ...e, status: res.switch_status === 'online' ? 'UP' : 'DOWN' } : e));
+          if (res.success) {
+            notifyNetworkSync();
+            addToast(
+              `Switch ${ip} synchronisé : ${res.interfaces_updated || 0} interfaces, ${res.vlans_updated || 0} VLANs`,
+              'success'
+            );
+          } else {
+            addToast(
+              res.error || `Switch ${ip} injoignable — vérifiez l'hôte et le port 22`,
+              'error'
+            );
+          }
         } catch (err) {
           addToast(`Erreur réseau lors du test de ${ip} : ${err.message}`, 'error');
         } finally {

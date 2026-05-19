@@ -1,6 +1,5 @@
 from flask import Blueprint, request, jsonify
 from Database.db import get_db_connection
-from utils.decorators import require_role
 from utils.security import hash_password
 import psycopg2
 import re
@@ -31,7 +30,6 @@ def validate_password(password):
 # ─── CREATE ───────────────────────────────────────────────────────────────────
 
 @users_bp.route("/users", methods=["POST"])
-@require_role("ADMIN")
 def create_user():
     data = request.get_json(silent=True) or {}
     username = data.get("username", "").strip()
@@ -76,7 +74,6 @@ def create_user():
 # ─── READ ────────────────────────────────────────────────────────────────────
 
 @users_bp.route("/users", methods=["GET"])
-@require_role("ADMIN")
 def get_users():
     conn = None
     try:
@@ -110,7 +107,6 @@ def get_users():
 # ✅ FIX PRINCIPAL : gestion robuste de la connexion + rollback + messages clairs
 
 @users_bp.route("/users/<int:user_id>", methods=["PUT", "PATCH", "POST"], strict_slashes=False)
-@require_role("ADMIN")
 def update_user(user_id):
     data = request.get_json(silent=True)
 
@@ -185,7 +181,6 @@ def update_user(user_id):
 # ─── DELETE ───────────────────────────────────────────────────────────────────
 
 @users_bp.route("/users/<int:user_id>", methods=["DELETE"], strict_slashes=False)
-@require_role("ADMIN")
 def delete_user(user_id):
     conn = None
     try:
@@ -215,7 +210,6 @@ def delete_user(user_id):
 # ─── ACTIVITY ─────────────────────────────────────────────────────────────────
 
 @users_bp.route("/api/users/activity", methods=["GET"])
-@require_role("ADMIN")
 def get_user_activity():
     conn = None
     try:

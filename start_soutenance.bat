@@ -22,4 +22,4 @@ if errorlevel 1 (
 echo.
 echo Demarrage du serveur web sur http://127.0.0.1:5000
 start "" http://127.0.0.1:5000
-"%PYTHON_EXE%" "%CD%\Backend\serve.py"
+"%PYTHON_EXE%" "%CD%\Backend\app.py"

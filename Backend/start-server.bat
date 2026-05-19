@@ -2,5 +2,5 @@
 cd /d "%~dp0"
 echo Starting NetWeb Backend Server...
 echo.
-python serve.py
+python app.py
 pause

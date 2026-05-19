@@ -5,9 +5,7 @@
   // ========================================================
 
   const STORAGE_KEY = 'netguardSession';
-  const API_BASE_STORAGE_KEY = 'netguardApiBaseUrl';
-  // Replace this fallback with your public ngrok/cloudflared URL for Vercel deployments.
-  const DEFAULT_API_BASE_URL = 'https://sufferer-cortex-starfish.ngrok-free.dev';
+  const DEFAULT_API_BASE_URL = 'http://127.0.0.1:5000';
   const ROLES = {
     ADMIN: 'ADMIN',
     NETWORK_ADMIN: 'NETWORK_ADMIN',
@@ -80,22 +78,11 @@
   }
 
   function getApiBaseUrl() {
-    const configuredValue =
-      window.NETGUARD_API_BASE ||
-      localStorage.getItem(API_BASE_STORAGE_KEY) ||
-      DEFAULT_API_BASE_URL;
-
-    return normalizeApiBaseUrl(configuredValue) || DEFAULT_API_BASE_URL;
+    return DEFAULT_API_BASE_URL;
   }
 
   function setApiBaseUrl(value) {
-    const normalizedValue = normalizeApiBaseUrl(value);
-    if (!normalizedValue) {
-      localStorage.removeItem(API_BASE_STORAGE_KEY);
-      return;
-    }
-
-    localStorage.setItem(API_BASE_STORAGE_KEY, normalizedValue);
+    return normalizeApiBaseUrl(value) || DEFAULT_API_BASE_URL;
   }
 
   function buildApiUrl(path) {
@@ -107,7 +94,6 @@
     const options = {
       method,
       headers: {
-        'ngrok-skip-browser-warning': 'true',
         ...customHeaders
       }
     };
@@ -122,7 +108,7 @@
     return options;
   }
 
-  // API Fetch wrapper that always includes ngrok header
+  // API Fetch wrapper for the local Flask backend.
   async function apiFetch(path, options = {}) {
     const url = buildApiUrl(path);
     const method = options.method || 'GET';
@@ -133,8 +119,7 @@
       method,
       headers: {
         ...authHeaders,
-        ...customHeaders,
-        'ngrok-skip-browser-warning': 'true'
+        ...customHeaders
       }
     };
     if (!body && !customHeaders['Content-Type']) {
@@ -289,15 +274,13 @@
     if (DEV_MODE) {
       return { 
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer dev-token',
-        'ngrok-skip-browser-warning': 'true'
+        'Authorization': 'Bearer dev-token'
       };
     }
     const token = localStorage.getItem('jwtToken');
     return {
       'Content-Type': 'application/json',
-      'Authorization': token ? `Bearer ${token}` : '',
-      'ngrok-skip-browser-warning': 'true'
+      'Authorization': token ? `Bearer ${token}` : ''
     };
   }
 

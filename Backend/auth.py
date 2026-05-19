@@ -1,22 +1,10 @@
-import os
-from datetime import timedelta
-
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import (
-    create_access_token,
-    decode_token,
-    get_jwt_identity,
-    jwt_required,
-)
 
 from Database.db import get_db_connection
 from utils.security import check_password, hash_password
 
 auth_bp = Blueprint("auth", __name__)
-
-
-def _get_public_base_url():
-    return os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
+LOCAL_BASE_URL = "http://127.0.0.1:5000"
 
 
 @auth_bp.route("/login", methods=["POST"])
@@ -69,14 +57,10 @@ def login():
             print(f"Erreur mise a jour last_login: {e}")
 
         user_role = user[3].upper() if user[3] else "AUDITOR"
-        access_token = create_access_token(
-            identity=user[1], additional_claims={"role": user_role}
-        )
 
         return jsonify(
             {
                 "message": "login success",
-                "access_token": access_token,
                 "username": user[1],
                 "email": user[4] or "",
                 "role": user_role,
@@ -87,10 +71,10 @@ def login():
 
 
 @auth_bp.route("/logout", methods=["POST"])
-@jwt_required()
 def logout():
     try:
-        current_user = get_jwt_identity()
+        data = request.json or {}
+        current_user = data.get("username", "").strip()
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -111,37 +95,9 @@ def logout():
 
 @auth_bp.route("/forgot-password", methods=["POST"])
 def forgot_password():
-    data = request.json
-    email = data.get("email")
-
-    if not email:
-        return jsonify({"error": "Email requis"}), 400
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id_user, username FROM utilisateur WHERE email = %s", (email,)
-        )
-        user = cursor.fetchone()
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        return jsonify({"error": f"Erreur de base de donnees : {str(e)}"}), 500
-
-    if user:
-        username = user[1]
-        token = create_access_token(
-            identity=username,
-            additional_claims={"pw_reset": True},
-            expires_delta=timedelta(minutes=30),
-        )
-        reset_link = f"{_get_public_base_url()}/reset-password.html?token={token}"
-        print(f"[INFO] Envoi simule de l'email de reinitialisation a {email}: {reset_link}")
-
     return jsonify(
         {
-            "message": "Si un compte existe pour cet email, un lien de reinitialisation a ete envoye."
+            "message": "Fonctionnalite de reinitialisation de mot de passe desactivee."
         }
     ), 200
 
@@ -174,52 +130,7 @@ def check_email():
 
 @auth_bp.route("/reset-password", methods=["POST"])
 def reset_password():
-    data = request.json
-    token = data.get("token")
-    new_password = data.get("new_password")
-
-    if not token or not new_password:
-        return jsonify({"error": "Token et nouveau mot de passe requis"}), 400
-
-    new_password = new_password.strip()
-
-    try:
-        decoded = decode_token(token)
-    except Exception:
-        return jsonify({"error": "Token invalide ou expire"}), 400
-
-    if not decoded.get("pw_reset"):
-        return jsonify({"error": "Token invalide pour la reinitialisation"}), 400
-
-    username = decoded.get("sub")
-    if not username:
-        return jsonify({"error": "Token invalide"}), 400
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        new_hash_bytes = hash_password(new_password)
-        new_hash_str = new_hash_bytes.decode("utf-8")
-
-        cursor.execute(
-            "UPDATE utilisateur SET password = %s WHERE username = %s",
-            (new_hash_str, username),
-        )
-
-        if cursor.rowcount == 0:
-            cursor.close()
-            conn.close()
-            return jsonify({"error": "Utilisateur non trouve"}), 404
-
-        conn.commit()
-        cursor.close()
-        conn.close()
-
-        return jsonify({"message": "Mot de passe reinitialise avec succes."}), 200
-
-    except Exception as e:
-        return jsonify({"error": f"Erreur de base de donnees : {str(e)}"}), 500
+    return jsonify({"error": "Fonctionnalite desactivee"}), 400
 
 
 @auth_bp.route("/reset-password-final", methods=["POST"])

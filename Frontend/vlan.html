@@ -182,7 +182,7 @@
     }
 
     const GLOBAL_VLAN_NETWORK = { base: '10.10.10.0', prefix: 24, int: ipToInt('10.10.10.0') };
-    const VLAN_MASKS = [25, 26, 27, 28, 29, 30];
+    const VLAN_MASKS = [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30];
 
     function ipToInt(ip) {
       const parts = String(ip || '').trim().split('.');
@@ -341,6 +341,13 @@
       const showToast = (msg, type = 'success') => {
         setToast({ msg, type });
         setTimeout(() => setToast(null), 5000);
+      };
+
+      const notifySync = () => {
+        const syncStamp = String(Date.now());
+        localStorage.setItem('netguard-network-sync-at', syncStamp);
+        localStorage.setItem('netguard-vlan-updated-at', syncStamp);
+        window.dispatchEvent(new CustomEvent('netguard:vlan-updated'));
       };
 
       const loadSwitches = async () => {
@@ -508,6 +515,31 @@
       }, [selectedSwitchId]);
 
       useEffect(() => {
+        const refreshFromSync = () => {
+          loadVlans(selectedSwitchId);
+          loadInterfaces(selectedSwitchId);
+        };
+
+        const handleNetworkSyncStorage = (event) => {
+          if (event.key === 'netguard-network-sync-at' || event.key === 'netguard-vlan-updated-at') {
+            refreshFromSync();
+          }
+        };
+
+        window.addEventListener('focus', refreshFromSync);
+        window.addEventListener('storage', handleNetworkSyncStorage);
+        window.addEventListener('netguard:vlan-updated', refreshFromSync);
+        window.addEventListener('netguard:interface-updated', refreshFromSync);
+
+        return () => {
+          window.removeEventListener('focus', refreshFromSync);
+          window.removeEventListener('storage', handleNetworkSyncStorage);
+          window.removeEventListener('netguard:vlan-updated', refreshFromSync);
+          window.removeEventListener('netguard:interface-updated', refreshFromSync);
+        };
+      }, [selectedSwitchId]);
+
+      useEffect(() => {
         if (selectedVlan?.id) {
           loadVlanDevices(selectedVlan.id, false);
         } else {
@@ -538,6 +570,7 @@
           if (response.ok && data.success) {
             setVlans(prev => prev.filter(v => v.id !== vlanId));
             if (selectedVlan?.id === vlanId) setSelectedVlan(null);
+            notifySync();
             showToast(`✅ VLAN ${vlanId} supprimé avec succès.`, 'success');
             if (window.NetGuardAudit) window.NetGuardAudit.vlanDeleted({ id: vlanId });
           } else {
@@ -733,6 +766,7 @@
             if (selectedVlan?.id === updatedVlan.id) setSelectedVlan(updatedVlan);
             setShowEditModal(false);
             setEditNetworkError(''); setEditGatewayError(''); setEditPortsError('');
+            notifySync();
             showToast(`✅ VLAN ${editVlan.id} modifié avec succès.`, 'success');
             if (window.NetGuardAudit) window.NetGuardAudit.vlanUpdated?.({ id: editVlan.id, name: editVlan.name });
           } else {
@@ -804,6 +838,7 @@
             setNetworkError('');
             setGatewayError('');
             setPortsError('');
+            notifySync();
 
             if (data.warning) {
               showToast(`⚠️ ${data.warning}`, 'error');
@@ -1521,46 +1556,14 @@ show ip access-lists`}</pre>
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-2 dark-mode:text-slate-400">Type de trafic</label>
-                      <select value={newVlan.type} onChange={(e) => setNewVlan({...newVlan, type: e.target.value})} className="w-full border border-slate-200 rounded-xl p-3 outline-none dark-mode:bg-slate-700 dark-mode:border-slate-600 dark-mode:text-slate-100">
-                        <option value="Data">Données</option>
-                        <option value="Voice">Voix</option>
-                        <option value="Management">Gestion et administration</option>
-                        <option value="Security">Sécurité / Isolation</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-2 dark-mode:text-slate-400">
-                        Affectation initiale des ports
-                        <span className="ml-2 font-mono font-normal text-slate-400 text-[10px]">{availableInterfaces.length} interfaces disponibles</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={newVlan.ports}
-                        onChange={(e) => handlePortsChange(e.target.value)}
-                        className={`w-full border rounded-xl p-3 outline-none transition-colors dark-mode:bg-slate-700 dark-mode:text-slate-100
-                          ${portsError
-                            ? 'border-rose-400 focus:border-rose-500 bg-rose-50/30 dark-mode:border-rose-600 dark-mode:bg-rose-950/20'
-                            : 'border-slate-200 focus:border-indigo-500 dark-mode:border-slate-600 dark-mode:focus:border-indigo-500'
-                          }`}
-                        placeholder={availableInterfaces.length > 0
-                          ? availableInterfaces.slice(0, 2).map(item => item.nom).join(', ')
-                          : 'Aucune interface disponible'}
-                      />
-                      {!portsError && availableInterfaces.length > 0 && (
-                        <p className="mt-1.5 text-[11px] text-slate-400 font-medium dark-mode:text-slate-500">
-                          {availableInterfaces.length} interface{availableInterfaces.length !== 1 ? 's' : ''} disponible{availableInterfaces.length !== 1 ? 's' : ''} : {availableInterfaces.slice(0, 6).map(item => item.nom).join(', ')}{availableInterfaces.length > 6 ? '...' : ''}
-                        </p>
-                      )}
-                      {portsError && (
-                        <p className="mt-1.5 text-[11px] font-semibold text-rose-500 flex items-center gap-1">
-                          <span>⚠</span> {portsError}
-                        </p>
-                      )}
-                    </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-2 dark-mode:text-slate-400">Type de trafic</label>
+                    <select value={newVlan.type} onChange={(e) => setNewVlan({...newVlan, type: e.target.value})} className="w-full border border-slate-200 rounded-xl p-3 outline-none dark-mode:bg-slate-700 dark-mode:border-slate-600 dark-mode:text-slate-100">
+                      <option value="Data">Données</option>
+                      <option value="Voice">Voix</option>
+                      <option value="Management">Gestion et administration</option>
+                      <option value="Security">Sécurité / Isolation</option>
+                    </select>
                   </div>
 
                   <div className="flex gap-4 mt-8">
@@ -1722,50 +1725,19 @@ show ip access-lists`}</pre>
                     )}
                   </div>
 
-                  {/* Type + Ports */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-2 dark-mode:text-slate-400">Type de trafic</label>
-                      <select
-                        value={editVlan.type}
-                        onChange={(e) => setEditVlan({...editVlan, type: e.target.value})}
-                        className="w-full border border-slate-200 rounded-xl p-3 outline-none dark-mode:bg-slate-700 dark-mode:border-slate-600 dark-mode:text-slate-100"
-                      >
-                        <option value="Data">Données</option>
-                        <option value="Voice">Voix</option>
-                        <option value="Management">Gestion et administration</option>
-                        <option value="Security">Sécurité / Isolation</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-2 dark-mode:text-slate-400">
-                        Ports
-                        <span className="ml-2 font-mono font-normal text-slate-400 text-[10px]">{availableInterfaces.length} interfaces disponibles</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={editVlan.ports}
-                        onChange={(e) => handleEditPortsChange(e.target.value)}
-                        className={`w-full border rounded-xl p-3 outline-none transition-colors dark-mode:bg-slate-700 dark-mode:text-slate-100 ${
-                          editPortsError
-                            ? 'border-rose-400 bg-rose-50/30 dark-mode:border-rose-600 dark-mode:bg-rose-950/20'
-                            : 'border-slate-200 focus:border-indigo-500 dark-mode:border-slate-600 dark-mode:focus:border-indigo-500'
-                        }`}
-                        placeholder={availableInterfaces.length > 0
-                          ? availableInterfaces.slice(0, 2).map(item => item.nom).join(', ')
-                          : 'Aucune interface disponible'}
-                      />
-                      {editPortsError && (
-                        <p className="mt-1.5 text-[11px] font-semibold text-rose-500 flex items-center gap-1">
-                          <span>⚠</span> {editPortsError}
-                        </p>
-                      )}
-                      {!editPortsError && availableInterfaces.length > 0 && (
-                        <p className="mt-1.5 text-[11px] text-slate-400 font-medium dark-mode:text-slate-500">
-                          Dispo : {availableInterfaces.slice(0, 5).map(item => item.nom).join(', ')}{availableInterfaces.length > 5 ? '...' : ''}
-                        </p>
-                      )}
-                    </div>
+                  {/* Type de trafic */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-2 dark-mode:text-slate-400">Type de trafic</label>
+                    <select
+                      value={editVlan.type}
+                      onChange={(e) => setEditVlan({...editVlan, type: e.target.value})}
+                      className="w-full border border-slate-200 rounded-xl p-3 outline-none dark-mode:bg-slate-700 dark-mode:border-slate-600 dark-mode:text-slate-100"
+                    >
+                      <option value="Data">Données</option>
+                      <option value="Voice">Voix</option>
+                      <option value="Management">Gestion et administration</option>
+                      <option value="Security">Sécurité / Isolation</option>
+                    </select>
                   </div>
 
                   {/* Boutons */}
